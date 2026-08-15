@@ -1,0 +1,121 @@
+name: Build and Deploy Arch Repo
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      # -------------------------------------------------------------
+      # 1. Clone your repos onto the build server
+      # -------------------------------------------------------------
+      
+      # Clone your Rust File Manager repo
+      - name: Checkout Rust File Manager
+        uses: actions/checkout@v4
+        with:
+          repository: 'viewerofall/machina'  # <-- REPLACE THIS
+          path: 'src/file-manager'
+
+      # Clone your Tauri App repo
+      - name: Checkout Tauri App
+        uses: actions/checkout@v4
+        with:
+          repository: 'your-username/your-tauri-app-repo'    # <-- REPLACE THIS
+          path: 'src/tauri-app'
+
+      # -------------------------------------------------------------
+      # 2. Setup build environment
+      # -------------------------------------------------------------
+      - name: Install Build Tools
+        run: |
+          pacman -Syu --noconfirm git sudo rust cargo nodejs npm zstd bsdtar webkit2gtk-4.1
+          useradd builder -m
+          echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+          mkdir -p /tmp/output
+
+      # -------------------------------------------------------------
+      # 3. Build yay-bin from AUR
+      # -------------------------------------------------------------
+      - name: Build yay-bin
+        run: |
+          su builder -c "
+            cd /tmp
+            git clone https://aur.archlinux.org/yay-bin.git
+            cd yay-bin
+            makepkg -s --noconfirm
+          "
+          cp /tmp/yay-bin/*.pkg.tar.zst /tmp/output/
+
+      # -------------------------------------------------------------
+      # 4. Build Rust File Manager
+      # -------------------------------------------------------------
+      - name: Build Rust File Manager
+        run: |
+          cd src/file-manager
+          cargo build --release
+          
+          mkdir -p /tmp/pkg-fm/usr/bin
+          # Replace 'file-manager-binary-name' with the actual output binary name
+          cp target/release/machina /tmp/pkg-fm/usr/bin/machina
+          
+          cat << 'EOF' > /tmp/pkg-fm/.PKGINFO
+          pkgname = Machina
+          pkgver = 1.0.0-1
+          pkgdesc = Clean and feature rich TUI file browser
+          arch = x86_64
+          license = MIT
+          EOF
+          
+          cd /tmp/pkg-fm
+          bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/my-file-manager-1.0.0-1-x86_64.pkg.tar.zst
+
+      # -------------------------------------------------------------
+      # 5. Build Tauri App
+      # -------------------------------------------------------------
+      - name: Build Tauri App
+        run: |
+          cd src/tauri-app
+          npm install
+          npm run tauri build
+          
+          mkdir -p /tmp/pkg-tauri/usr/bin
+          # Replace 'tauri-app-binary-name' with the output binary name inside src-tauri/target/release/
+          cp src-tauri/target/release/scratchpad /tmp/pkg-tauri/usr/bin/scratchpad
+          
+          cat << 'EOF' > /tmp/pkg-tauri/.PKGINFO
+          pkgname = my-tauri-app
+          pkgver = 1.0.0-1
+          pkgdesc = Custom Tauri Desktop Application
+          arch = x86_64
+          license = MIT
+          EOF
+          
+          cd /tmp/pkg-tauri
+          bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/my-tauri-app-1.0.0-1-x86_64.pkg.tar.zst
+
+      # -------------------------------------------------------------
+      # 6. Generate database & Publish to GitHub Pages
+      # -------------------------------------------------------------
+      - name: Generate Repo DB
+        run: |
+          cd /tmp/output
+          repo-add my_repo.db.tar.gz *.pkg.tar.zst
+
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/output
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

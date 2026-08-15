@@ -39,7 +39,7 @@ jobs:
       # -------------------------------------------------------------
       - name: Install Build Tools
         run: |
-          pacman -Syu --noconfirm git sudo rust cargo nodejs npm zstd bsdtar webkit2gtk-4.1
+         pacman -Syu --noconfirm git sudo rust cargo nodejs npm zstd libarchive webkit2gtk-4.1
           useradd builder -m
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           mkdir -p /tmp/output

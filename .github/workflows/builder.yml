@@ -123,16 +123,17 @@ jobs:
           path: /tmp/output
 
           
-          # -------------------------------------------------------------
+# -------------------------------------------------------------
       # Generate pacman database & real file copies for GitHub Pages
       # -------------------------------------------------------------
       - name: Generate Repo DB
         run: |
           cd /tmp/output
           repo-add Veil-PKG.db.tar.gz *.pkg.tar.zst
-          cp -f Veil-PKG.db.tar.gz Veil-PKG.db
-          cp -f Veil-PKG.files.tar.gz Veil-PKG.files
+          cp --remove-destination Veil-PKG.db.tar.gz Veil-PKG.db
+          cp --remove-destination Veil-PKG.files.tar.gz Veil-PKG.files
 
+          
   # -------------------------------------------------------------
   # Deployment Job
   # -------------------------------------------------------------

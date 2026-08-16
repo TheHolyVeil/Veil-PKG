@@ -11,14 +11,16 @@ permissions:
   id-token: write
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
     steps:
-      # -------------------------------------------------------------
-      # 1. Clone your repos onto the build server
-      # -------------------------------------------------------------
+      # 1. Checkout your main repo (where index.html lives)
+      - name: Checkout Veil-PKG
+        uses: actions/checkout@v4
+
+      # 2. Checkout external project repositories
       - name: Checkout Rust File Manager (machina)
         uses: actions/checkout@v4
         with:
@@ -31,9 +33,7 @@ jobs:
           repository: 'viewerofall/GlassPad'
           path: 'src/tauri-app'
 
-      # -------------------------------------------------------------
-      # 2. Setup build environment
-      # -------------------------------------------------------------
+      # 3. Setup build environment
       - name: Install Build Tools
         run: |
           pacman -Syu --noconfirm git sudo rust cargo nodejs npm zstd libarchive webkit2gtk-4.1
@@ -41,9 +41,7 @@ jobs:
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           mkdir -p /tmp/output
 
-      # -------------------------------------------------------------
-      # 3. Rust Dependency Caching
-      # -------------------------------------------------------------
+      # 4. Rust Dependency Caching
       - name: Cache Rust Dependencies
         uses: Swatinem/rust-cache@v2
         with:
@@ -51,9 +49,7 @@ jobs:
             src/file-manager
             src/tauri-app/src-tauri
 
-      # -------------------------------------------------------------
-      # 4. Build yay-bin from AUR
-      # -------------------------------------------------------------
+      # 5. Build yay-bin
       - name: Build yay-bin
         run: |
           su builder -c "
@@ -64,9 +60,7 @@ jobs:
           "
           cp /tmp/yay-bin/*.pkg.tar.zst /tmp/output/
 
-      # -------------------------------------------------------------
-      # 5. Build Machina File Manager
-      # -------------------------------------------------------------
+      # 6. Build Machina
       - name: Build Machina File Manager
         run: |
           cd src/file-manager
@@ -86,9 +80,7 @@ jobs:
           cd /tmp/pkg-fm
           bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/machina-1.0.0-1-x86_64.pkg.tar.zst
 
-      # -------------------------------------------------------------
-      # 6. Build GlassPad Tauri App
-      # -------------------------------------------------------------
+      # 7. Build GlassPad
       - name: Build GlassPad (scratchpad binary)
         run: |
           cd src/tauri-app
@@ -109,36 +101,25 @@ jobs:
           cd /tmp/pkg-tauri
           bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/glasspad-1.0.0-1-x86_64.pkg.tar.zst
 
-      # -------------------------------------------------------------
-      # 7. Generate database & Upload Artifact
-      # -------------------------------------------------------------
-      - name: Generate Repo DB
-        run: |
-          cd /tmp/output
-          repo-add my_repo.db.tar.gz *.pkg.tar.zst
-
-      - name: Upload Pages Artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: /tmp/output
-
-          
-# -------------------------------------------------------------
-      # Generate pacman database & real file copies for GitHub Pages
-      # -------------------------------------------------------------
-      - name: Generate Repo DB
+      # 8. Generate pacman database, copy static index.html, & prevent Jekyll filtering
+      - name: Generate Repo DB & Web Output
         run: |
           cd /tmp/output
           repo-add Veil-PKG.db.tar.gz *.pkg.tar.zst
           cp --remove-destination Veil-PKG.db.tar.gz Veil-PKG.db
           cp --remove-destination Veil-PKG.files.tar.gz Veil-PKG.files
+          cp $GITHUB_WORKSPACE/index.html /tmp/output/index.html
+          touch .nojekyll
 
-          
-  # -------------------------------------------------------------
-  # Deployment Job
-  # -------------------------------------------------------------
+      # 9. Upload everything to Pages Artifact
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: /tmp/output
+
+  # 10. Deploy to GitHub Pages
   deploy:
-    needs: build
+    needs: build-and-deploy
     runs-on: ubuntu-latest
     environment:
       name: github-pages

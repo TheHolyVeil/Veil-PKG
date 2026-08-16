@@ -11,7 +11,7 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     container:
       image: archlinux:base-devel
@@ -19,19 +19,16 @@ jobs:
       # -------------------------------------------------------------
       # 1. Clone your repos onto the build server
       # -------------------------------------------------------------
-      
-      # Clone your Rust File Manager repo
-      - name: Checkout Rust File Manager
+      - name: Checkout Rust File Manager (machina)
         uses: actions/checkout@v4
         with:
-          repository: 'viewerofall/machina'  # <-- REPLACE THIS
+          repository: 'viewerofall/machina'
           path: 'src/file-manager'
 
-      # Clone your Tauri App repo
-      - name: Checkout Tauri App
+      - name: Checkout Tauri App (GlassPad)
         uses: actions/checkout@v4
         with:
-          repository: 'viewerofall/GlassPad'    # <-- REPLACE THIS
+          repository: 'viewerofall/GlassPad'
           path: 'src/tauri-app'
 
       # -------------------------------------------------------------
@@ -39,13 +36,23 @@ jobs:
       # -------------------------------------------------------------
       - name: Install Build Tools
         run: |
-         pacman -Syu --noconfirm git sudo rust cargo nodejs npm zstd libarchive webkit2gtk-4.1
+          pacman -Syu --noconfirm git sudo rust cargo nodejs npm zstd libarchive webkit2gtk-4.1
           useradd builder -m
           echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
           mkdir -p /tmp/output
 
       # -------------------------------------------------------------
-      # 3. Build yay-bin from AUR
+      # 3. Rust Dependency Caching
+      # -------------------------------------------------------------
+      - name: Cache Rust Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src/file-manager
+            src/tauri-app/src-tauri
+
+      # -------------------------------------------------------------
+      # 4. Build yay-bin from AUR
       # -------------------------------------------------------------
       - name: Build yay-bin
         run: |
@@ -58,54 +65,52 @@ jobs:
           cp /tmp/yay-bin/*.pkg.tar.zst /tmp/output/
 
       # -------------------------------------------------------------
-      # 4. Build Rust File Manager
+      # 5. Build Machina File Manager
       # -------------------------------------------------------------
-      - name: Build Rust File Manager
+      - name: Build Machina File Manager
         run: |
           cd src/file-manager
           cargo build --release
           
           mkdir -p /tmp/pkg-fm/usr/bin
-          # Replace 'file-manager-binary-name' with the actual output binary name
           cp target/release/machina /tmp/pkg-fm/usr/bin/machina
           
           cat << 'EOF' > /tmp/pkg-fm/.PKGINFO
-          pkgname = Machina
+          pkgname = machina
           pkgver = 1.0.0-1
-          pkgdesc = Clean and feature rich TUI file browser
+          pkgdesc = Machina Rust File Manager
           arch = x86_64
           license = MIT
           EOF
           
           cd /tmp/pkg-fm
-          bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/my-file-manager-1.0.0-1-x86_64.pkg.tar.zst
+          bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/machina-1.0.0-1-x86_64.pkg.tar.zst
 
       # -------------------------------------------------------------
-      # 5. Build Tauri App
+      # 6. Build GlassPad Tauri App
       # -------------------------------------------------------------
-      - name: Build Tauri App
+      - name: Build GlassPad (scratchpad binary)
         run: |
           cd src/tauri-app
           npm install
           npm run tauri build
           
           mkdir -p /tmp/pkg-tauri/usr/bin
-          # Replace 'tauri-app-binary-name' with the output binary name inside src-tauri/target/release/
           cp src-tauri/target/release/scratchpad /tmp/pkg-tauri/usr/bin/scratchpad
           
           cat << 'EOF' > /tmp/pkg-tauri/.PKGINFO
-          pkgname = my-tauri-app
+          pkgname = glasspad
           pkgver = 1.0.0-1
-          pkgdesc = Custom Tauri Desktop Application
+          pkgdesc = GlassPad Tauri Desktop Application
           arch = x86_64
           license = MIT
           EOF
           
           cd /tmp/pkg-tauri
-          bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/my-tauri-app-1.0.0-1-x86_64.pkg.tar.zst
+          bsdtar --uid 0 --gid 0 -cnf - .PKGINFO usr | zstd -z - > /tmp/output/glasspad-1.0.0-1-x86_64.pkg.tar.zst
 
       # -------------------------------------------------------------
-      # 6. Generate database & Publish to GitHub Pages
+      # 7. Generate database & Upload Artifact
       # -------------------------------------------------------------
       - name: Generate Repo DB
         run: |
@@ -117,5 +122,16 @@ jobs:
         with:
           path: /tmp/output
 
+  # -------------------------------------------------------------
+  # Deployment Job
+  # -------------------------------------------------------------
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
